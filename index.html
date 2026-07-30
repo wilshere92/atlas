@@ -572,7 +572,7 @@ border-radius:12px;background:var(--bg);color:var(--text)}
 .fx-refresh{width:100%;margin-top:10px}
 
 
-/* ATLAS v2.0.1 iPhone settings/safe-area patch */
+/* ATLAS v2.1.0 iPhone settings/safe-area patch */
 html,body{
   min-height:100%;
   min-height:100dvh;
@@ -677,6 +677,28 @@ body.settings-open .fab{
 }
 @supports not (background:color-mix(in srgb, white 50%, transparent)){
   .settings-header{background:var(--card)}
+}
+
+
+/* ATLAS v2.1.0 automatic market data */
+.market-status{
+  margin-top:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:var(--bg);
+  color:var(--muted);
+  font-size:10px;
+  line-height:1.5;
+}
+.market-actions{
+  display:grid;
+  grid-template-columns:1fr;
+  gap:8px;
+  margin-top:10px;
+}
+.market-refreshing{
+  opacity:.65;
+  pointer-events:none;
 }
 
 </style>
@@ -971,6 +993,16 @@ body.settings-open .fab{
       </div>
       <button type="button" id="fxRefreshButton" class="backup-btn fx-refresh">지금 환율 업데이트</button>
     </div>
+    <div class="setting-row" style="display:block">
+      <div class="row">
+        <div><b>주가 자동 업데이트</b><small>보유 종목의 현재가를 자동으로 불러와 평가금액에 반영합니다.</small></div>
+        <button type="button" id="marketAutoSwitch" class="switch" aria-label="주가 자동 업데이트"></button>
+      </div>
+      <div id="marketDataStatus" class="market-status">아직 주가를 업데이트하지 않았습니다.</div>
+      <div class="market-actions">
+        <button type="button" id="marketRefreshButton" class="backup-btn primary">지금 주가 업데이트</button>
+      </div>
+    </div>
     <div class="setting-row">
       <div><b>월 투자 목표</b><small>달성률과 신규 매수 추천에 사용합니다.</small></div>
       <div class="inline-money"><input id="monthlyTargetInput" class="setting-control" inputmode="numeric" aria-label="월 투자 목표"><span>원</span></div>
@@ -1011,7 +1043,7 @@ body.settings-open .fab{
       <div><b>앱 정보</b><small>Atlas 버전과 기본 정보를 확인합니다.</small></div>
       <span class="setting-right">›</span>
     </div>
-    <div class="version">ATLAS v2.0.1</div>
+    <div class="version">ATLAS v2.1.0</div>
   </div>
 </div>
 
@@ -1075,6 +1107,7 @@ body.settings-open .fab{
   var FAVORITES_KEY='atlas-favorites-v1';
   var FX_SETTINGS_KEY='atlas-fx-settings-v1';
   var HISTORY_KEY='atlas-asset-history-v1';
+  var MARKET_KEY='atlas-market-data-v1';
   var currentDetailTicker='';
   var editingRecordId=null;
   var ASSETS=[
@@ -1305,6 +1338,145 @@ body.settings-open .fab{
     var fx=loadFxSettings();
     return {KRW:1,USD:fx.usdKrw,JPY:fx.jpyKrw};
   }
+
+  var DEFAULT_MARKET_SETTINGS={auto:true,updatedAt:'',source:'Yahoo Finance',prices:{}};
+
+  function loadMarketData(){
+    try{
+      var parsed=JSON.parse(localStorage.getItem(MARKET_KEY)||'null')||{};
+      return {
+        auto:parsed.auto!==false,
+        updatedAt:parsed.updatedAt||'',
+        source:parsed.source||'Yahoo Finance',
+        prices:parsed.prices&&typeof parsed.prices==='object'?parsed.prices:{}
+      };
+    }catch(e){
+      return {auto:true,updatedAt:'',source:'Yahoo Finance',prices:{}};
+    }
+  }
+
+  function saveMarketData(data){
+    localStorage.setItem(MARKET_KEY,JSON.stringify(data));
+  }
+
+  function yahooSymbol(ticker){
+    var info=assetInfo(ticker);
+    if(info.market==='국내 주식')return ticker+'.KS';
+    if(info.market==='일본 주식')return ticker+'.T';
+    return ticker;
+  }
+
+  function marketCurrency(ticker){
+    var info=assetInfo(ticker);
+    if(info.market==='국내 주식')return 'KRW';
+    if(info.market==='일본 주식')return 'JPY';
+    return 'USD';
+  }
+
+  function formatMarketTime(value){
+    if(!value)return '업데이트 기록 없음';
+    var d=new Date(value);
+    if(isNaN(d))return '업데이트 기록 없음';
+    return d.toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  }
+
+  function renderMarketUI(){
+    var market=loadMarketData();
+    var sw=byId('marketAutoSwitch');
+    var status=byId('marketDataStatus');
+    if(sw)sw.classList.toggle('on',market.auto);
+    if(status){
+      var count=Object.keys(market.prices||{}).filter(function(k){
+        return Number(market.prices[k]&&market.prices[k].price)>0;
+      }).length;
+      status.textContent=market.updatedAt
+        ? formatMarketTime(market.updatedAt)+' · '+count+'개 종목 · 시장 데이터는 지연될 수 있음'
+        : '아직 주가를 업데이트하지 않았습니다.';
+    }
+  }
+
+  async function fetchYahooPrice(ticker){
+    var symbol=yahooSymbol(ticker);
+    var url='https://query1.finance.yahoo.com/v8/finance/chart/'+encodeURIComponent(symbol)+'?interval=1d&range=5d';
+    var response=await fetch(url,{cache:'no-store'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    var data=await response.json();
+    var result=data&&data.chart&&data.chart.result&&data.chart.result[0];
+    var meta=result&&result.meta;
+    var price=Number(meta&&(meta.regularMarketPrice||meta.previousClose));
+    if(!(price>0))throw new Error('price');
+    return {
+      price:price,
+      currency:String(meta.currency||marketCurrency(ticker)).toUpperCase(),
+      updatedAt:new Date().toISOString(),
+      symbol:symbol
+    };
+  }
+
+  function heldTickers(){
+    var records=loadRecords();
+    var quantities={};
+    records.slice().sort(function(a,b){
+      return (String(a.isoDate||'')+'-'+String(a.id||'')).localeCompare(String(b.isoDate||'')+'-'+String(b.id||''));
+    }).forEach(function(r){
+      if(r.type!=='매수'&&r.type!=='매도')return;
+      var ticker=String(r.ticker||'').toUpperCase();
+      if(!ticker||ticker==='CASH')return;
+      var qty=Math.max(0,Number(r.quantity)||0);
+      quantities[ticker]=(quantities[ticker]||0)+(r.type==='매수'?qty:-qty);
+    });
+    return Object.keys(quantities).filter(function(t){return quantities[t]>0});
+  }
+
+  async function refreshMarketPrices(showMessage){
+    var market=loadMarketData();
+    if(!market.auto&&!showMessage)return;
+    var button=byId('marketRefreshButton');
+    if(button){
+      button.classList.add('market-refreshing');
+      button.textContent='주가 업데이트 중…';
+    }
+    var tickers=heldTickers();
+    if(!tickers.length){
+      renderMarketUI();
+      if(button){
+        button.classList.remove('market-refreshing');
+        button.textContent='지금 주가 업데이트';
+      }
+      if(showMessage)showToast('수량이 입력된 보유 종목이 없습니다');
+      return;
+    }
+    var success=0;
+    var nextPrices=Object.assign({},market.prices||{});
+    var results=await Promise.allSettled(tickers.map(function(ticker){
+      return fetchYahooPrice(ticker).then(function(value){return {ticker:ticker,value:value}});
+    }));
+    results.forEach(function(result){
+      if(result.status==='fulfilled'){
+        nextPrices[result.value.ticker]=result.value.value;
+        success++;
+      }
+    });
+    if(success>0){
+      market.prices=nextPrices;
+      market.updatedAt=new Date().toISOString();
+      market.source='Yahoo Finance';
+      saveMarketData(market);
+      renderSummary();
+      if(currentDetailTicker)openDetail(currentDetailTicker);
+    }
+    renderMarketUI();
+    if(button){
+      button.classList.remove('market-refreshing');
+      button.textContent='지금 주가 업데이트';
+    }
+    if(showMessage){
+      if(success===tickers.length)showToast(success+'개 종목 주가를 업데이트했습니다');
+      else if(success>0)showToast(success+'개 성공 · '+(tickers.length-success)+'개 실패');
+      else showToast('주가 업데이트에 실패해 저장된 가격을 사용합니다');
+    }
+  }
+
   function formatFxTime(value){
     if(!value)return '업데이트 기록 없음';
     var d=new Date(value);
@@ -1585,7 +1757,13 @@ body.settings-open .fab{
       .filter(function(h){return h.quantity>0 || h.buyAmount>0})
       .sort(function(a,b){return b.buyAmount-a.buyAmount});
 
+    var marketData=loadMarketData();
     list.forEach(function(h){
+      var live=marketData.prices&&marketData.prices[h.ticker];
+      if(live&&Number(live.price)>0){
+        h.currentPrice=Number(live.price);
+        h.currentCurrency=String(live.currency||marketCurrency(h.ticker)).toUpperCase();
+      }
       var fx=h.currentCurrency==='KRW'?1:
         (h.currentCurrency==='JPY'?loadFxSettings().jpyKrw:loadFxSettings().usdKrw);
       var priceKrw=h.currentPrice>0?h.currentPrice*fx:0;
@@ -2036,13 +2214,14 @@ body.settings-open .fab{
   function exportBackup(){
     var payload={
       app:'ATLAS',
-      version:'2.0.1',
+      version:'2.1.0',
       exportedAt:new Date().toISOString(),
       records:loadRecords(),
       targets:loadTargets(),
       rebalanceSettings:loadAppSettings(),
       displaySettings:loadDisplaySettings(),
       fxSettings:loadFxSettings(),
+      marketData:loadMarketData(),
       favorites:loadFavorites(),
       assetHistory:loadHistory(),
       settings:{
@@ -2054,7 +2233,7 @@ body.settings-open .fab{
     var a=document.createElement('a');
     var d=new Date();
     a.href=url;
-    a.download='ATLAS-v2.0.1-backup-'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'.json';
+    a.download='ATLAS-v2.1.0-backup-'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2074,6 +2253,7 @@ body.settings-open .fab{
         if(data.rebalanceSettings)saveAppSettings(data.rebalanceSettings);
         if(data.displaySettings)saveDisplaySettings(data.displaySettings);
         if(data.fxSettings)saveFxSettings(data.fxSettings);
+        if(data.marketData)saveMarketData(data.marketData);
         if(Array.isArray(data.favorites))saveFavorites(data.favorites);
         if(Array.isArray(data.assetHistory))saveHistory(data.assetHistory);
         if(data.settings && (data.settings.theme==='dark' || data.settings.theme==='light')){
@@ -2103,6 +2283,7 @@ body.settings-open .fab{
     localStorage.removeItem(FAVORITES_KEY);
     localStorage.removeItem(FX_SETTINGS_KEY);
     localStorage.removeItem(HISTORY_KEY);
+    localStorage.removeItem(MARKET_KEY);
     renderSummary();
     closeSettings();
     showToast('모든 데이터를 삭제했습니다');
@@ -2345,6 +2526,15 @@ saveRecords(records);
     }
   });
   byId('fxRefreshButton').addEventListener('click',function(){refreshExchangeRates(true)});
+  byId('marketAutoSwitch').addEventListener('click',function(){
+    var market=loadMarketData();
+    market.auto=!market.auto;
+    saveMarketData(market);
+    renderMarketUI();
+    if(market.auto)refreshMarketPrices(true);
+    else showToast('주가 자동 업데이트를 껐습니다');
+  });
+  byId('marketRefreshButton').addEventListener('click',function(){refreshMarketPrices(true)});
   function saveManualFx(){
     var fx=loadFxSettings();
     if(fx.auto)return;
@@ -2396,7 +2586,23 @@ byId('detailFavorite').addEventListener('click',function(){
     var fx=loadFxSettings();
     var age=fx.updatedAt?Date.now()-new Date(fx.updatedAt).getTime():Infinity;
     if(fx.auto && age>12*60*60*1000)refreshExchangeRates(false);
+
+    var market=loadMarketData();
+    var marketAge=market.updatedAt?Date.now()-new Date(market.updatedAt).getTime():Infinity;
+    if(market.auto && marketAge>30*60*1000)refreshMarketPrices(false);
   })();
+
+  window.setInterval(function(){
+    var market=loadMarketData();
+    if(market.auto&&!document.hidden)refreshMarketPrices(false);
+  },30*60*1000);
+
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden)return;
+    var market=loadMarketData();
+    var age=market.updatedAt?Date.now()-new Date(market.updatedAt).getTime():Infinity;
+    if(market.auto&&age>30*60*1000)refreshMarketPrices(false);
+  });
 })();
 </script>
 </body>
