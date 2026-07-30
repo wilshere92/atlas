@@ -571,6 +571,114 @@ border-radius:12px;background:var(--bg);color:var(--text)}
 .fx-setting-grid input{width:100%;margin-top:5px;border:1px solid var(--line);border-radius:10px;padding:9px;background:var(--bg);color:var(--text)}
 .fx-refresh{width:100%;margin-top:10px}
 
+
+/* ATLAS v2.0.1 iPhone settings/safe-area patch */
+html,body{
+  min-height:100%;
+  min-height:100dvh;
+}
+body{
+  overscroll-behavior-y:none;
+}
+body.settings-open{
+  overflow:hidden;
+  height:100dvh;
+  touch-action:none;
+}
+body.settings-open .nav,
+body.settings-open .fab{
+  display:none!important;
+}
+.settings-panel{
+  position:fixed;
+  inset:0;
+  bottom:0!important;
+  width:100%;
+  height:100vh;
+  height:100dvh;
+  background:var(--card);
+  overflow:hidden;
+  z-index:200;
+  overscroll-behavior:none;
+}
+.settings-panel.open{
+  display:block;
+}
+.settings-panel .sheet{
+  position:absolute;
+  inset:0;
+  transform:none;
+  width:100%;
+  max-width:390px;
+  height:100%;
+  max-height:none;
+  margin:0 auto;
+  overflow-y:auto;
+  overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior-y:contain;
+  touch-action:pan-y;
+  border-radius:0;
+  padding:
+    calc(12px + env(safe-area-inset-top))
+    18px
+    calc(28px + env(safe-area-inset-bottom));
+  scrollbar-gutter:stable;
+}
+.settings-header{
+  position:sticky;
+  top:calc(-12px - env(safe-area-inset-top));
+  z-index:5;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  min-height:64px;
+  margin:
+    calc(-12px - env(safe-area-inset-top))
+    -18px
+    12px;
+  padding:
+    calc(12px + env(safe-area-inset-top))
+    18px
+    10px;
+  background:color-mix(in srgb,var(--card) 96%,transparent);
+  border-bottom:1px solid var(--line);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+}
+.settings-header h2{
+  margin:0;
+}
+.settings-close{
+  width:40px;
+  height:40px;
+  border:1px solid var(--line);
+  border-radius:50%;
+  background:var(--bg);
+  color:var(--text);
+  font-size:17px;
+  display:grid;
+  place-items:center;
+}
+.settings-panel .version{
+  padding-bottom:8px;
+}
+.nav{
+  padding-bottom:max(env(safe-area-inset-bottom),8px);
+  height:calc(66px + env(safe-area-inset-bottom));
+}
+.app,
+.page-shell{
+  padding-top:calc(18px + env(safe-area-inset-top));
+  padding-bottom:calc(96px + env(safe-area-inset-bottom));
+}
+.fab{
+  bottom:calc(88px + env(safe-area-inset-bottom));
+}
+@supports not (background:color-mix(in srgb, white 50%, transparent)){
+  .settings-header{background:var(--card)}
+}
+
 </style>
 </head>
 <body>
@@ -839,7 +947,7 @@ border-radius:12px;background:var(--bg);color:var(--text)}
 <div id="settings" class="settings-panel" role="dialog" aria-modal="true" aria-label="설정">
   <div class="sheet">
     <div class="handle"></div>
-    <h2>설정</h2>
+    <div class="settings-header"><h2>설정</h2><button type="button" id="settingsClose" class="settings-close" aria-label="설정 닫기">✕</button></div>
     <div class="setting-row">
       <div><b>다크 모드</b><small>화면 구성은 그대로 유지하고 색상만 변경합니다.</small></div>
       <button type="button" id="themeSwitch" class="switch" aria-label="다크 모드 전환"></button>
@@ -903,7 +1011,7 @@ border-radius:12px;background:var(--bg);color:var(--text)}
       <div><b>앱 정보</b><small>Atlas 버전과 기본 정보를 확인합니다.</small></div>
       <span class="setting-right">›</span>
     </div>
-    <div class="version">ATLAS v2.0.0</div>
+    <div class="version">ATLAS v2.0.1</div>
   </div>
 </div>
 
@@ -1361,7 +1469,10 @@ border-radius:12px;background:var(--bg);color:var(--text)}
     toast.classList.add('show');
     window.setTimeout(function(){toast.classList.remove('show')},1800);
   }
-  function closeSettings(){byId('settings').classList.remove('open')}
+  function closeSettings(){
+    byId('settings').classList.remove('open');
+    document.body.classList.remove('settings-open');
+  }
   function closeTrade(){byId('tradePanel').classList.remove('open')}
   function isCashType(type){
     return type==='입금'||type==='출금';
@@ -1583,7 +1694,7 @@ border-radius:12px;background:var(--bg);color:var(--text)}
     if(byId('homeBestAsset'))byId('homeBestAsset').textContent='최고 수익 종목 '+(best?best.ticker+' ('+(best.returnRate||0).toFixed(2)+'%)':'-');
     if(byId('homeHoldingCount'))byId('homeHoldingCount').textContent='보유 종목 '+calc.holdings.length+'개';
     var top=calc.holdings.slice().sort(function(a,b){return b.marketValue-a.marketValue;})[0];
-    if(byId('homeTopWeight'))byId('homeTopWeight').textContent='최고 비중 '+(top?(top.ticker+' '+((calc.investedAssets?top.marketValue/calc.investedAssets*100:0).toFixed(1)+'%'):'-');
+    if(byId('homeTopWeight'))byId('homeTopWeight').textContent='최고 비중 '+(top?(top.ticker+' '+(calc.investedAssets?top.marketValue/calc.investedAssets*100:0).toFixed(1)+'%'):'-');
     var buyDates=records.filter(function(r){return r.type==='매수'&&r.isoDate;}).map(function(r){return new Date(r.isoDate);}).filter(function(d){return !isNaN(d);}).sort(function(a,b){return a-b;});
     var investDays=0,cagr=0;
     if(buyDates.length){
@@ -1918,14 +2029,14 @@ border-radius:12px;background:var(--bg);color:var(--text)}
       button.classList.toggle('active',button.getAttribute('data-view')===name);
     });
     byId('fab').classList.toggle('hidden',name!=='home'&&name!=='records');
-    window.scrollTo(0,0);
+    window.requestAnimationFrame(function(){window.scrollTo({top:0,left:0,behavior:'auto'})});
   }
 
 
   function exportBackup(){
     var payload={
       app:'ATLAS',
-      version:'2.0.0',
+      version:'2.0.1',
       exportedAt:new Date().toISOString(),
       records:loadRecords(),
       targets:loadTargets(),
@@ -1943,7 +2054,7 @@ border-radius:12px;background:var(--bg);color:var(--text)}
     var a=document.createElement('a');
     var d=new Date();
     a.href=url;
-    a.download='ATLAS-v2.0.0-backup-'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'.json';
+    a.download='ATLAS-v2.0.1-backup-'+d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'.json';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2066,7 +2177,13 @@ function initTheme(){
     if(e.target===byId('tradePanel'))closeTrade();
   });
 
-  byId('moreButton').addEventListener('click',function(){byId('settings').classList.add('open')});
+  byId('moreButton').addEventListener('click',function(){
+    byId('settings').classList.add('open');
+    document.body.classList.add('settings-open');
+    var sheet=byId('settings').querySelector('.sheet');
+    if(sheet)sheet.scrollTop=0;
+  });
+  byId('settingsClose').addEventListener('click',closeSettings);
   byId('backupExport').addEventListener('click',exportBackup);
   byId('backupImport').addEventListener('click',function(){byId('backupFile').click()});
   byId('backupFile').addEventListener('change',function(){importBackup(this.files&&this.files[0])});
